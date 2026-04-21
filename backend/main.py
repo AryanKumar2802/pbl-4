@@ -1,3 +1,4 @@
+import os
 from backend.config import OPENROUTER_API_KEY
 print("KEY VALUE:", repr(OPENROUTER_API_KEY))
 
@@ -20,7 +21,11 @@ app = FastAPI(title="LLM Council API")
 # Enable CORS for local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        FRONTEND_URL,
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

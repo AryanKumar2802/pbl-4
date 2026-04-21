@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: llm-council-backend
+    runtime: python
+    buildCommand: pip install uv && uv sync
+    startCommand: uv run uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false   # you'll paste the value in Render dashboard
