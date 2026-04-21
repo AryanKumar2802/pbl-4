@@ -1,8 +1,5 @@
-"""Configuration for the LLM Council."""
-
-OPENROUTER_API_KEY = "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"
-
-
+import os
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
 # ⚠️ Ensure you have $10 in your OpenRouter account to unlock 1,000 requests/day
 """Configuration for the LLM Council."""
