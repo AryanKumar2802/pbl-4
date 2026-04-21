@@ -1,3 +1,6 @@
+from backend.config import OPENROUTER_API_KEY
+print("KEY VALUE:", repr(OPENROUTER_API_KEY))
+
 """FastAPI backend for LLM Council."""
 
 from fastapi import FastAPI, HTTPException

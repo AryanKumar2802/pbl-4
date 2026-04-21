@@ -4,6 +4,7 @@ import httpx
 import asyncio
 from typing import List, Dict, Any, Optional
 from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
+print("🔑 KEY BEING USED:", repr(OPENROUTER_API_KEY[:20]))
 
 # Retry configuration
 MAX_RETRIES = 3

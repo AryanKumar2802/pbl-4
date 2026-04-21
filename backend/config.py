@@ -1,6 +1,6 @@
 """Configuration for the LLM Council."""
 
-OPENROUTER_API_KEY = "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"
+OPENROUTER_API_KEY = "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"
 
 
 
@@ -22,8 +22,12 @@ COUNCIL_MODELS = [
     # 2. OpenAI GPT-OSS 120B: High-capacity MoE with massive uptime.
     "openai/gpt-oss-120b:free",
     
-    # 3. Google Gemma 3 27B: Extremely reliable and rarely congested.
-    "google/gemma-3-27b-it:free",
+  
+    
+    # 4. DeepSeek R1: High-performance model with excellent reasoning capabilities.
+    
+
+      "inclusionai/ling-2.6-flash:free"
 ]
 
 # Chairman = GPT-OSS 120B (Highest priority on OpenRouter routing)
