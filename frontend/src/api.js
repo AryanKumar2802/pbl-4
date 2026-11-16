@@ -1,18 +1,41 @@
+
 /**
  * API client for the LLM Council backend.
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE = (
+  import.meta.env.VITE_API_URL || 'http://localhost:8000'
+).replace(/\/+$/, '');
+
+async function handleResponse(response, defaultError) {
+  if (!response.ok) {
+    let details = '';
+
+    try {
+      details = await response.text();
+    } catch {
+      // Ignore response parsing errors.
+    }
+
+    throw new Error(
+      `${defaultError} (${response.status})${details ? ': ' + details : ''}`
+    );
+  }
+
+  return response;
+}
 
 export const api = {
   /**
    * List all conversations.
    */
   async listConversations() {
-    const response = await fetch(`${API_BASE}/api/conversations`);
-    if (!response.ok) {
-      throw new Error('Failed to list conversations');
-    }
+    const response = await fetch(
+      `${API_BASE}/api/conversations`
+    );
+
+    await handleResponse(response, 'Failed to list conversations');
+
     return response.json();
   },
 
@@ -20,16 +43,19 @@ export const api = {
    * Create a new conversation.
    */
   async createConversation() {
-    const response = await fetch(`${API_BASE}/api/conversations`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({}),
-    });
-    if (!response.ok) {
-      throw new Error('Failed to create conversation');
-    }
+    const response = await fetch(
+      `${API_BASE}/api/conversations`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      }
+    );
+
+    await handleResponse(response, 'Failed to create conversation');
+
     return response.json();
   },
 
@@ -40,14 +66,14 @@ export const api = {
     const response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}`
     );
-    if (!response.ok) {
-      throw new Error('Failed to get conversation');
-    }
+
+    await handleResponse(response, 'Failed to get conversation');
+
     return response.json();
   },
 
   /**
-   * Send a message in a conversation.
+   * Send a normal, non-streaming message.
    */
   async sendMessage(conversationId, content) {
     const response = await fetch(
@@ -60,18 +86,14 @@ export const api = {
         body: JSON.stringify({ content }),
       }
     );
-    if (!response.ok) {
-      throw new Error('Failed to send message');
-    }
+
+    await handleResponse(response, 'Failed to send message');
+
     return response.json();
   },
 
   /**
-   * Send a message and receive streaming updates.
-   * @param {string} conversationId - The conversation ID
-   * @param {string} content - The message content
-   * @param {function} onEvent - Callback function for each event: (eventType, data) => void
-   * @returns {Promise<void>}
+   * Send a message and receive Server-Sent Events.
    */
   async sendMessageStream(conversationId, content, onEvent) {
     const response = await fetch(
@@ -80,36 +102,79 @@ export const api = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
         },
         body: JSON.stringify({ content }),
       }
     );
 
-    if (!response.ok) {
-      throw new Error('Failed to send message');
+    await handleResponse(response, 'Failed to send streaming message');
+
+    if (!response.body) {
+      throw new Error('Streaming response body is unavailable');
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    let buffer = '';
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+    const processEvent = (eventBlock) => {
+      const lines = eventBlock.split(/\r?\n/);
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          try {
-            const event = JSON.parse(data);
-            onEvent(event.type, event);
-          } catch (e) {
-            console.error('Failed to parse SSE event:', e);
-          }
+      const dataLines = lines
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart());
+
+      if (dataLines.length === 0) return;
+
+      const data = dataLines.join('\n');
+
+      if (!data || data === '[DONE]') return;
+
+      try {
+        const event = JSON.parse(data);
+
+        if (event.type) {
+          onEvent(event.type, event);
+        } else {
+          console.warn('SSE event has no type:', event);
+        }
+      } catch (error) {
+        console.error('Failed to parse SSE event:', error, data);
+      }
+    };
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete SSE events, preserving incomplete data.
+        const events = buffer.split(/\r?\n\r?\n/);
+
+        buffer = events.pop() || '';
+
+        for (const eventBlock of events) {
+          processEvent(eventBlock);
         }
       }
+
+      // Flush any remaining decoder data.
+      buffer += decoder.decode();
+
+      // Process the final event if the stream ends without a blank line.
+      if (buffer.trim()) {
+        processEvent(buffer);
+      }
+    } catch (error) {
+      console.error('Streaming connection failed:', error);
+      throw error;
+    } finally {
+      reader.releaseLock();
     }
   },
 };
