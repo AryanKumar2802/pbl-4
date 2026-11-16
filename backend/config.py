@@ -17,7 +17,7 @@ COUNCIL_MODELS = [
     "nvidia/nemotron-3-super-120b-a12b:free",
     
     # 2. OpenAI GPT-OSS 120B: High-capacity MoE with massive uptime.
-    "openai/gpt-oss-120b:free",
+    "openrouter/free",
     
   
     
@@ -28,6 +28,6 @@ COUNCIL_MODELS = [
 ]
 
 # Chairman = GPT-OSS 120B (Highest priority on OpenRouter routing)
-CHAIRMAN_MODEL = "openai/gpt-oss-120b:free"
+CHAIRMAN_MODEL = "openrouter/free"
 
 DATA_DIR = "data/conversations"
