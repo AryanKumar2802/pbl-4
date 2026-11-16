@@ -6,7 +6,7 @@ from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
 
 # Delay between stages to avoid hammering free-tier rate limits
-INTER_STAGE_DELAY = 30.0  # seconds
+INTER_STAGE_DELAY = 3.0  # seconds
 
 # Max characters per response fed into the chairman prompt
 RESPONSE_TRUNCATION_LIMIT = 800
