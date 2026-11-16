@@ -1,27 +1,38 @@
+
 """OpenRouter API client for making LLM requests."""
 
-import httpx
 import asyncio
+import httpx
 from typing import List, Dict, Any, Optional
-from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
-print("🔑 KEY BEING USED:", repr(OPENROUTER_API_KEY[:20]))
 
-# Retry configuration
-MAX_RETRIES = 3
-RETRY_DELAY = 5.0  # seconds between retries on rate limit
+from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
+
+
+# Request configuration
+MAX_RETRIES = 2
+RETRY_DELAY = 3.0
+DEFAULT_TIMEOUT = 75.0
+
+RETRYABLE_STATUS_CODES = {
+    408, 429, 500, 502, 503, 504
+}
 
 
 async def query_model(
     model: str,
     messages: List[Dict[str, str]],
-    timeout: float = 120.0
+    timeout: float = DEFAULT_TIMEOUT
 ) -> Optional[Dict[str, Any]]:
+
+    if not OPENROUTER_API_KEY:
+        print("[CONFIG ERROR] OPENROUTER_API_KEY is missing.")
+        return None
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:5173",
-        "X-Title": "LLM Council Prototype",
+        "HTTP-Referer": "https://pbl-4-lwdo.onrender.com",
+        "X-Title": "LLM Council",
     }
 
     payload = {
@@ -31,76 +42,109 @@ async def query_model(
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(timeout, connect=15.0)
+            ) as client:
+
                 response = await client.post(
                     OPENROUTER_API_URL,
                     headers=headers,
                     json=payload
                 )
 
-                # Log full response body before raising so we always see the error
                 if response.status_code != 200:
-                    print(f"[HTTP ERROR] Model: {model}")
-                    print(f"[HTTP ERROR] Status: {response.status_code}")
-                    print(f"[HTTP ERROR] Body: {response.text}")
 
-                response.raise_for_status()
+                    print(
+                        f"[HTTP ERROR] Model: {model} | "
+                        f"Status: {response.status_code}"
+                    )
+
+                    print(
+                        f"[HTTP ERROR] Response: "
+                        f"{response.text[:1000]}"
+                    )
+
+                    if (
+                        response.status_code in RETRYABLE_STATUS_CODES
+                        and attempt < MAX_RETRIES
+                    ):
+                        wait = RETRY_DELAY * attempt
+
+                        print(
+                            f"[RETRY] {model} in {wait} seconds "
+                            f"(attempt {attempt + 1}/{MAX_RETRIES})"
+                        )
+
+                        await asyncio.sleep(wait)
+                        continue
+
+                    return None
 
                 data = response.json()
 
-                # Check for API-level errors returned with 200 status
                 if "error" in data:
-                    print(f"[API ERROR] Model: {model}")
-                    print(f"[API ERROR] Details: {data['error']}")
+                    print(
+                        f"[API ERROR] Model: {model} | "
+                        f"Details: {data['error']}"
+                    )
                     return None
 
                 choices = data.get("choices", [])
 
                 if not choices:
-                    print(f"[EMPTY RESPONSE] Model: {model} returned no choices")
-                    print(f"[EMPTY RESPONSE] Full response: {data}")
+                    print(
+                        f"[EMPTY RESPONSE] Model: {model} "
+                        "returned no choices."
+                    )
                     return None
 
                 message = choices[0].get("message", {})
                 content = message.get("content", "")
 
                 if not content:
-                    print(f"[EMPTY CONTENT] Model: {model} returned empty content")
+                    print(
+                        f"[EMPTY CONTENT] Model: {model}"
+                    )
                     return None
+
+                print(f"[SUCCESS] Model responded: {model}")
 
                 return {
                     "content": content,
-                    "reasoning_details": message.get("reasoning_details"),
+                    "reasoning_details": message.get(
+                        "reasoning_details"
+                    ),
                 }
 
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                print(f"[Rate Limit] Model: {model} — attempt {attempt}/{MAX_RETRIES}")
-                print(f"[Rate Limit] Response: {e.response.text}")
-                if attempt < MAX_RETRIES:
-                    wait = RETRY_DELAY * attempt  # exponential-ish backoff
-                    print(f"[Rate Limit] Waiting {wait}s before retry...")
-                    await asyncio.sleep(wait)
-                    continue
-                else:
-                    print(f"[Rate Limit] Max retries reached for {model}")
-                    return None
-            else:
-                print(f"[HTTP ERROR] Model: {model} — Status: {e.response.status_code}")
-                print(f"[HTTP ERROR] Body: {e.response.text}")
-                return None
-
         except httpx.TimeoutException:
-            print(f"[TIMEOUT] Model: {model} timed out after {timeout}s (attempt {attempt}/{MAX_RETRIES})")
+            print(
+                f"[TIMEOUT] {model} | "
+                f"Attempt {attempt}/{MAX_RETRIES}"
+            )
+
             if attempt < MAX_RETRIES:
                 await asyncio.sleep(RETRY_DELAY)
                 continue
+
             return None
 
-        except Exception as e:
-            print(f"[UNEXPECTED ERROR] Model: {model}")
-            print(f"[UNEXPECTED ERROR] Type: {type(e).__name__}")
-            print(f"[UNEXPECTED ERROR] Details: {str(e)}")
+        except httpx.RequestError as error:
+            print(
+                f"[CONNECTION ERROR] {model}: "
+                f"{type(error).__name__}: {error}"
+            )
+
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(RETRY_DELAY)
+                continue
+
+            return None
+
+        except Exception as error:
+            print(
+                f"[UNEXPECTED ERROR] {model}: "
+                f"{type(error).__name__}: {error}"
+            )
             return None
 
     return None
@@ -111,18 +155,50 @@ async def query_models_parallel(
     messages: List[Dict[str, str]]
 ) -> Dict[str, Optional[Dict[str, Any]]]:
 
-    tasks = [query_model(model, messages) for model in models]
-    responses = await asyncio.gather(*tasks, return_exceptions=False)
+    print(
+        f"\n[PARALLEL QUERY] Starting {len(models)} model requests"
+    )
 
-    results = {model: response for model, response in zip(models, responses)}
+    tasks = [
+        query_model(model, messages)
+        for model in models
+    ]
 
-    # Log summary of which models succeeded/failed
-    succeeded = [m for m, r in results.items() if r is not None]
-    failed = [m for m, r in results.items() if r is None]
+    responses = await asyncio.gather(
+        *tasks,
+        return_exceptions=True
+    )
 
-    if succeeded:
-        print(f"[Parallel Query] Succeeded: {succeeded}")
-    if failed:
-        print(f"[Parallel Query] Failed: {failed}")
+    results = {}
+
+    for model, response in zip(models, responses):
+
+        if isinstance(response, Exception):
+            print(
+                f"[PARALLEL ERROR] {model}: {response}"
+            )
+            results[model] = None
+
+        else:
+            results[model] = response
+
+    succeeded = [
+        model for model, response in results.items()
+        if response is not None
+    ]
+
+    failed = [
+        model for model, response in results.items()
+        if response is None
+    ]
+
+    print("\n[PARALLEL QUERY SUMMARY]")
+    print(f"Successful models: {len(succeeded)}/{len(models)}")
+
+    for model in succeeded:
+        print(f"  [OK] {model}")
+
+    for model in failed:
+        print(f"  [FAILED] {model}")
 
     return results
